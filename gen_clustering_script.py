@@ -25,19 +25,26 @@ def execBashCommand(cmd):
 
 # Strict checking of config params
 def sanityCheck(appConfig):
-    if type(appConfig['num_cores_on_machine']) != int or \
+    if type(appConfig['num_cores_on_machine']) != str or \
         type(appConfig['geofile']) != str or  \
-        appConfig['geofile'].count('/') != 4 or \
         type(appConfig['list_of_generators']) != list or \
         type(appConfig['hadoop_input_dir']) != str or \
         appConfig['hadoop_input_dir'].count('/') != 3 or \
         type(appConfig['local_location']) != str or \
-        appConfig['local_location'].count('/') != 4 :
+        appConfig['local_location'].count('/') != 4 or \
+        appConfig['geofile'].count('/') != 4:
+        print(type(appConfig['num_cores_on_machine']))
+        print(type(appConfig['geofile']))
+        print(type(appConfig['list_of_generators']))
+        print(type(appConfig['hadoop_input_dir']))
+        print(appConfig['hadoop_input_dir'].count('/'))
+        print(type(appConfig['local_location']))
         print("Please check config file. Fatal Error. Program exiting.")
         exit()
 
 sanityCheck(appConfig)
-
+print(appConfig['num_cores_on_machine'])
+num_cores_on_machine = int(appConfig['num_cores_on_machine'])
 
 # Pull Data from Hadoop and write to folder hadoop_temp_data
 machine_id = {}
@@ -52,12 +59,12 @@ execBashCommand(BASHCMD_CleanLocalDir)
 
 
 BASHCMD_HadoopToLocalSystem = 'hadoop fs -get' + appConfig['hadoop_input_dir'] + "%s " + \
-    appConfig['local_input_location'] + '%s'
+  appConfig['local_input_location'] + '%s'
 
 
 for key in machine_id.keys():
-    current_bash_command = BASHCMD_HadoopToLocalSystem % (key,key)
-    execBashCommand(current_bash_command)
+   current_bash_command = BASHCMD_HadoopToLocalSystem % (key,key)
+   execBashCommand(current_bash_command)
 
 # Loading the data from the geolocation (lat,long) into a python dictionary (Hash-Map) with the graph vertex as key
 geofile = appConfig['geofile']
@@ -78,9 +85,9 @@ with open(geofile) as f:
 ## Importing the output files from all processes
 files_dict = {}
 vertex_to_block_id = {}
-for i in range(0,appConfig['num_cores_on_machine']):
+for i in range(0,num_cores_on_machine):
     filename_string = "part_"+str(i)
-    current_file = appConfig['local_input_location']+ "/" + filename_string
+    current_file = appConfig['local_location'] + filename_string
     vertices_on_machine = {}
     with open(current_file) as f:
         for line in f:
@@ -108,7 +115,6 @@ geo_df.columns= ['lat','long']
 
 for key in machine_id.keys():
     dataframes[key] = pd.merge(dataframes[key],geo_df,how='left',left_index=True,right_index=True)
-    print(dataframes[key].head(6))
 
 ## Now, we have the data that we need for clustering
 ## Let's go over each machine dataframe, and check if each machine is even assigned more than 4 generators
@@ -136,7 +142,7 @@ def doClustering(dataframe, key, value):
     kmeans_estimators[key] = KMeans(init='k-means++', n_clusters=4, n_init=10)
     dataframe_temp = dataframe.copy()
     dataframe_temp = dataframe_temp.reset_index()
-    dataframe_temp = dataframe_temp[dataframe_temp['Vertex'].isin(list_of_generators)]
+    dataframe_temp = dataframe_temp[dataframe_temp['Vertex'].isin(appConfig['list_of_generators'])]
     # CREATE TEMP DATAFRAME WITH GENERATORS ONLY
     dataframe_temp['ClusterID'] = get_labels_k_means(kmeans_estimators[key],
                                          data=dataframe_temp[['lat','long']])
@@ -145,7 +151,6 @@ def doClustering(dataframe, key, value):
     merged_dataframe = pd.merge(dataframe,dataframe_temp[['ClusterID']],how='left',left_index = True, right_index=True)
     merged_dataframe['ClusterID'].fillna(-999,inplace=True)
     merged_dataframe['ClusterID'] = merged_dataframe['ClusterID'].astype(np.int64)
-#         merged_dataframe = merged_dataframe[['adjacency_list','from_file','machine_id','block_id','lat','long']]
     return merged_dataframe
 
 def get_labels_k_means(estimator, data):
@@ -183,13 +188,14 @@ def printProgress (iteration, total, prefix = '', suffix = '', decimals = 2, bar
         print("\n")
 
 i     = 0
-l     = len(vertices_on_machine)*appConfig['num_cores_on_machine']
+l     = len(vertices_on_machine)*num_cores_on_machine
 
-for key in machine_id.keys():
+if appConfig['local_location'] == appConfig['output_location']:
+    for key in machine_id.keys():
+       execBashCommand("rm -rf " + appConfig['local_location']+key)
+       print("Deleted file - " + key)
+
     execBashCommand("rm -rf " + appConfig['local_location']+key)
-    print("Deleted file - " + key)
-
-execBashCommand("rm -rf " + appConfig['local_location']+key)
 
 # HEAVY DISK I/O
 printProgress(i, l, prefix = 'Progress:', suffix = 'Complete', barLength = 50)
@@ -200,21 +206,21 @@ for key in machine_id.keys():
         line_str=""
         line_str = line_str + str(key) + " " +str(value['block_id'])+ " "  + str(value['machine_id'])+ " "  + str(value['ClusterID'])+ "\t" + str(value['adjacency_list'])
         big_line_buffer = big_line_buffer + '\n' + line_str
-        if (i % 5000) == 0:
-            with open(appConfig['local_location']+value['from_file'], 'a') as f:
+        if (i % 10000) == 0:
+            with open(appConfig['output_location']+value['from_file'], 'a') as f:
                 print(big_line_buffer, file=f)
                 big_line_buffer = ""
             f.close()
             printProgress(i, l, prefix = 'Progress:', suffix = 'Complete', barLength = 50)
 
 if appConfig['hadoop_input_dir'] != '':
-    BASHCMD_delete_hadoop_directory = "hadoop fs -rm "+ appConfig['hadoop_input_dir']+ '*'
+   BASHCMD_delete_hadoop_directory = "hadoop fs -rm "+ appConfig['hadoop_input_dir']+ '*'
 
 BASHCMD_LocalSystemToHadoop = 'hadoop fs -put' +appConfig['local_input_location'] + "%s " + \
-    appConfig['hadoop_input_dir'] + '%s'
+   appConfig['hadoop_input_dir'] + '%s'
 
 for key in machine_id.keys():
-    current_bash_command = BASHCMD_HadoopToLocalSystem % (key,key)
-    execBashCommand(current_bash_command)
+   current_bash_command = BASHCMD_HadoopToLocalSystem % (key,key)
+   execBashCommand(current_bash_command)
 
 print("...............Done..............")
