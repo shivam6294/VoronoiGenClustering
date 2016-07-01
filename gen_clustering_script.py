@@ -54,12 +54,12 @@ machine_id['part_2'] = 2
 machine_id['part_3'] = 3
 
 # Clean up local input location
-BASHCMD_CleanLocalDir = "rm -rf "+appConfig['local_input_location']+"*"
+BASHCMD_CleanLocalDir = "rm -rf "+appConfig['local_location']+"*"
 execBashCommand(BASHCMD_CleanLocalDir)
 
 
 BASHCMD_HadoopToLocalSystem = 'hadoop fs -get' + appConfig['hadoop_input_dir'] + "%s " + \
-  appConfig['local_input_location'] + '%s'
+  appConfig['local_location'] + '%s'
 
 
 for key in machine_id.keys():
@@ -216,7 +216,7 @@ for key in machine_id.keys():
 if appConfig['hadoop_input_dir'] != '':
    BASHCMD_delete_hadoop_directory = "hadoop fs -rm "+ appConfig['hadoop_input_dir']+ '*'
 
-BASHCMD_LocalSystemToHadoop = 'hadoop fs -put' +appConfig['local_input_location'] + "%s " + \
+BASHCMD_LocalSystemToHadoop = 'hadoop fs -put' +appConfig['local_location'] + "%s " + \
    appConfig['hadoop_input_dir'] + '%s'
 
 for key in machine_id.keys():
